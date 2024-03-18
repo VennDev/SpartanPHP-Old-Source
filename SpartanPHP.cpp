@@ -23,13 +23,29 @@ namespace fs = std::experimental::filesystem;
 class encode_data
 {
 public:
-	string code, path_project;
+	string code, path_project, path_temp, path_folder_temp;
 	bool is_completed = false;
-	encode_data(const string& code, const string& path_project = "") : code(code), path_project(path_project) {}
+	encode_data(const string& code, const string& path_project, const string& path_temp, const string& path_folder_temp) : code(code), path_project(path_project), path_temp(path_temp), path_folder_temp(path_folder_temp) {}
 
 	void set_completed(bool value) {
 		is_completed = value;
 	}
+};
+
+class result_decode
+{
+public:
+	string code, path_project, path_folder;
+
+	result_decode(const string& code, const string& path_project, const string& path_folder) : code(code), path_project(path_project), path_folder(path_folder) {}
+};
+
+class result_temp
+{
+public:
+	string path_project, path_temp;
+
+	result_temp(const string& path_project, const string& path_temp) : path_project(path_project), path_temp(path_temp) {}
 };
 
 int _hard_crypt = 1000;
@@ -37,7 +53,78 @@ int _char_encode = 123;
 int _quality_runtime = 5;
 string _path_project, _path_environment;
 string _prefix_title = "SpartanPHP";
+string _version = "1.2.0";
+string _author = "VennDev";
 vector<encode_data> _encode_files;
+
+std::wstring string_to_wide_string(const std::string& str) {
+	std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+	return converter.from_bytes(str);
+}
+
+std::string generate_datetime_string() {
+	time_t now = time(0);
+	tm* ltm = localtime(&now);
+	return to_string(1 + ltm->tm_mon) + to_string(ltm->tm_mday) + to_string(1900 + ltm->tm_year) + to_string(ltm->tm_hour) + to_string(ltm->tm_min) + to_string(ltm->tm_sec) + to_string(rand() % 1000);
+}
+
+// ABCDEF...XYZ random
+std::string generate_string_char(int length = 5) {
+	std::string result;
+	std::srand(0);
+
+	for (int i = 0; i < length; ++i) {
+		char ch = (std::rand() % 26) + 65;
+		result.push_back(ch);
+	}
+
+	return result;
+}
+
+// It will be used to create a temporary file in the system and hide it from the user.
+result_temp create_temp_php_file(const std::string& php_code) {
+
+	// get short string from php_code
+	std::string short_php_code = php_code.substr(0, 5);
+	
+	string time_date = generate_datetime_string();
+	string temp_folder_name = short_php_code + generate_string_char(5) + time_date;
+	string temp_file_name = short_php_code + generate_string_char(5) + time_date + ".txt";
+	
+	char temp_path[MAX_PATH];
+	GetTempPathA(MAX_PATH, temp_path);
+
+	std::string temp_dir_path = temp_path;
+	temp_dir_path += temp_folder_name;
+
+	// time to exit if failed to create directory
+	auto start_time = std::chrono::steady_clock::now();
+	auto end_time = start_time + std::chrono::seconds(5);
+	
+	while (!CreateDirectoryA(temp_dir_path.c_str(), NULL)) {
+		time_date = generate_datetime_string();
+		temp_folder_name = short_php_code + generate_string_char(5) + time_date;
+		temp_file_name = short_php_code + generate_string_char(5) + time_date + ".exe";
+		temp_dir_path = temp_path;
+		temp_dir_path += temp_folder_name;
+	}
+
+	std::ofstream phpFile(temp_dir_path + "\\" + temp_file_name);
+	if (!phpFile) {
+		std::cerr << "Failed to decode. Exit 2\n";
+		system("pause");
+	}
+
+	phpFile << php_code;
+	phpFile.close();
+
+	if (!SetFileAttributesA(temp_dir_path.c_str(), FILE_ATTRIBUTE_HIDDEN)) {
+		std::cerr << "Failed to decode. Exit 3\n";
+		system("pause");
+	}
+
+	return result_temp(temp_dir_path + "\\" + temp_file_name, temp_dir_path);
+}
 
 void set_title(const string& title) {
 	const string real_title = title;
@@ -139,8 +226,8 @@ string generate_intro_encode() {
 	string intro;
 	intro += " *\n";
 	intro += " * This file is encoded by SpartanPHP\n";
-	intro += " * Version: 1.0.0\n";
-	intro += " * Author: VennDev\n";
+	intro += " * Version: " + _version + "\n";
+	intro += " * Author: " + _author + "\n";
 	intro += " *\n";
 	return intro;
 }
@@ -171,13 +258,27 @@ string clean_string(const string& string)
 }
 
 bool is_file_open_by_anotherrogram(const std::string& filename) {
-	std::ifstream file(filename.c_str());
-	return !file.is_open();
+	// string to wchar_t
+	size_t newsize = strlen(filename.c_str()) + 1;
+	wchar_t* wfilename = new wchar_t[newsize];
+	size_t convertedChars = 0;
+	mbstowcs_s(&convertedChars, wfilename, newsize, filename.c_str(), _TRUNCATE);
+	
+	HANDLE hFile = CreateFile(wfilename, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hFile == INVALID_HANDLE_VALUE) {
+		delete[] wfilename;
+		return true;
+	}
+	
+	CloseHandle(hFile);
+
+	delete[] wfilename;
+
+	return false;
 }
 
 void restore_data() {
 	const auto start_time = std::chrono::steady_clock::now();
-	// 0.5 seconds
 	const auto end_time = start_time + std::chrono::seconds(_quality_runtime);
 
 	// This security is to prevent the program other read the file, but i dont certain this is work.
@@ -191,6 +292,10 @@ void restore_data() {
 					std::ofstream restore_file(data.path_project);
 					restore_file << data.code;
 					restore_file.close();
+
+					// remove temp file
+					fs::remove(data.path_temp);
+					fs::remove(data.path_folder_temp);
 				}
 			}
 		}
@@ -201,13 +306,16 @@ void restore_data() {
 			std::ofstream restore_file(data.path_project);
 			restore_file << data.code;
 			restore_file.close();
+
+			// remove temp file
+			fs::remove(data.path_temp);
+			fs::remove(data.path_folder_temp);
 		}
 	}
 }
 
 // Encode from code [php] to [ascii]
-string process_encode(const string& key, const string& content)
-{
+string process_encode(const string& key, const string& content) {
 	// remove <?php and ?>
 	const string content_no_php = str_replace(content, "<?php", "");
 	const string content_no_php2 = str_replace(content_no_php, "?>", "");
@@ -245,9 +353,12 @@ string process_encode(const string& key, const string& content)
 	string hash_pass = generate_hash_pass(_prefix_title, generate_fake_content(_prefix_title, _hard_crypt));
 	const string fake_code_a = "/**\n" + generate_intro_encode() + fake_content + "**/";
 	const string fake_code_b = "/**" + fake_content + "**/";
+
+	string file_get_contents = "\"\\x66\\x69\\x6c\\x65\\x5f\\x67\\x65\\x74\\x5f\\x63\\x6f\\x6e\\x74\\x65\\x6e\\x74\\x73\"";
+	string base64_enc = "\"\\x62\\x61\\x73\\x65\\x36\\x34\\x5f\\x64\\x65\\x63\\x6f\\x64\\x65\"";
 	
     encoded_content = base64_encode(content_clean);
-	encoded_content = "eval" + fake_code_b + "(" + fake_code_b + "base64_decode" + fake_code_b + "(\"" + base64_encode(fake_content) + encoded_content + "\"));";
+	encoded_content = "eval" + fake_code_b + "(" + fake_code_b + base64_enc + fake_code_b + "(\"" + base64_encode(fake_content) + encoded_content + "\"));";
     
     return "<?php \n" + hash_pass + fake_code_a + encoded_content + fake_code_b + " ?>";
 }
@@ -264,7 +375,7 @@ std::string get_filename_from_path(const std::string& path) {
 }
 
 // Decode from [ascii] to code [php]
-string process_decode(const string& key, const string& content)
+result_decode process_decode(const string& key, const string& content)
 {
 	std::regex pattern("\\(\"([^\"]+)\"\\)");
 	std::smatch matches;
@@ -281,7 +392,7 @@ string process_decode(const string& key, const string& content)
 	}
 
 	// check have eval
-	if (content.find("/eval/") == std::string::npos || content.find("/base64_decode/") == std::string::npos) {
+	if (content.find("/eval/") == std::string::npos) {
 		cerr << "Failed to decode content! please check your code.\n";
 		restore_data();
 		system("pause");
@@ -292,13 +403,20 @@ string process_decode(const string& key, const string& content)
 	string hash_pass = generate_hash_pass(_prefix_title, generate_fake_content(_prefix_title, _hard_crypt));
 	const string fake_code_a = "/**\n" + generate_intro_encode() + fake_content + "**/";
 	const string fake_code_b = "/**" + fake_content + "**/";
+
+	string file_get_contents = "\"\\x66\\x69\\x6c\\x65\\x5f\\x67\\x65\\x74\\x5f\\x63\\x6f\\x6e\\x74\\x65\\x6e\\x74\\x73\"";
+	string base64_enc = "\"\\x62\\x61\\x73\\x65\\x36\\x34\\x5f\\x64\\x65\\x63\\x6f\\x64\\x65\"";
 	
 	decoded_content = str_replace(decoded_content, base64_encode(fake_content), "");
-	decoded_content = "eval" + fake_code_b + "(" + fake_code_b + "base64_decode" + fake_code_b + "(\"" + decoded_content + "\"));";
+	
+	result_temp temp_path = create_temp_php_file(decoded_content);
+	string base_64_temp_path = base64_encode(temp_path.path_project);
+	
+	decoded_content = "eval(" + fake_code_b + base64_enc + fake_code_b + "(" + fake_code_b + file_get_contents + fake_code_b + "(" + fake_code_b + base64_enc + fake_code_b + "(\"" + base_64_temp_path + "\"))));";
 	
 	const string real_code = "<?php \n" + hash_pass + fake_code_a + decoded_content + fake_code_b + " ?>";
     
-    return real_code;
+    return result_decode(real_code, temp_path.path_project, temp_path.path_temp);
 }
 
 void run_decode(const std::string& path_project) {
@@ -307,18 +425,18 @@ void run_decode(const std::string& path_project) {
 	in_file.close();
 
 	string final_name = get_filename_from_path(path_project);
-	std::string decoded_code = process_decode(final_name, encoded_code);
+	result_decode decoded_result = process_decode(final_name, encoded_code);
 
 	std::ifstream original_file(path_project);
 	std::string original_code((std::istreambuf_iterator<char>(original_file)), std::istreambuf_iterator<char>());
 	original_file.close();
 
 	std::ofstream out_file(path_project);
-	out_file << decoded_code;
+	out_file << decoded_result.code;
 	out_file.close();
 
 	// save original code to vector
-	_encode_files.push_back(encode_data(original_code, path_project));
+	_encode_files.push_back(encode_data(original_code, path_project, decoded_result.path_project, decoded_result.path_folder));
 }
 
 void run_encode(const std::string& path_project) {
@@ -354,7 +472,6 @@ void run_process(const std::string& path_project, const std::function<void(const
 		}
 		else if (entry.path().extension() == ".php") {
 			process_php_file(entry, content_processor);
-			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		}
 	}
 }
@@ -394,10 +511,12 @@ std::string get_cmd() {
 }
 
 void show_intro() {
-	cout << dye::green("Welcome to SpartanPHP!\n\n");
+	cout << dye::green("Welcome to SpartanPHP - " + _version + "\n\n");
 	cout << dye::yellow("Your settings:\n");
 	cout << dye::aqua("- Path project: ") + dye::white(_path_project) + "\n";
-	cout << dye::aqua("- Path environment: ") + dye::white(_path_environment) + "\n\n";
+	cout << dye::aqua("- Path environment: ") + dye::white(_path_environment) + "\n";
+	cout << dye::aqua("- Quality runtime: ") + dye::white(std::to_string(_quality_runtime)) + "\n";
+	cout << dye::aqua("- Hard crypt: ") + dye::white(std::to_string(_hard_crypt)) + "\n\n";
 }
 
 void on_process() {
