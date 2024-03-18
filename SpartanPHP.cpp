@@ -81,18 +81,40 @@ std::string generate_string_char(int length = 5) {
 	return result;
 }
 
-// It will be used to create a temporary file in the system and hide it from the user.
-result_temp create_temp_php_file(const std::string& php_code) {
+int random_number(int min, int max) {
+	static bool first = true;
 
+	if (first) {  
+		srand( time(NULL) );
+		first = false;
+	}
+
+	return min + rand() % (( max + 1 ) - min);
+}
+
+// It will be used to create a temporary file in the system and hide it from the user.
+// It will temp path from the system or in ProgramData or in AppData
+result_temp create_temp_php_file(const std::string& php_code) {
 	// get short string from php_code
 	std::string short_php_code = php_code.substr(0, 5);
 	
 	string time_date = generate_datetime_string();
 	string temp_folder_name = short_php_code + generate_string_char(5) + time_date;
 	string temp_file_name = short_php_code + generate_string_char(5) + time_date + ".txt";
-	
+
+	// random 1 or 0
+	int random = random_number(0, 2);
+
 	char temp_path[MAX_PATH];
-	GetTempPathA(MAX_PATH, temp_path);
+	if (random == 0) {
+		GetTempPathA(MAX_PATH, temp_path);
+	}
+	else if (random == 1) {
+		GetEnvironmentVariableA("ProgramData", temp_path, MAX_PATH);
+	}
+	else {
+		GetEnvironmentVariableA("AppData", temp_path, MAX_PATH);
+	}
 
 	std::string temp_dir_path = temp_path;
 	temp_dir_path += temp_folder_name;
@@ -520,7 +542,6 @@ void show_intro() {
 }
 
 void on_process() {
-
 	if (_quality_runtime > 5) {
 		cout << dye::red("Warning: Quality runtime is too high, it can be slow down your computer!\n");
 		cout << dye::red("Please set quality runtime to 5 or less.\n");
