@@ -520,6 +520,13 @@ void show_intro() {
 }
 
 void on_process() {
+
+	if (_quality_runtime > 5) {
+		cout << dye::red("Warning: Quality runtime is too high, it can be slow down your computer!\n");
+		cout << dye::red("Please set quality runtime to 5 or less.\n");
+		system("pause");
+	}
+	
 	system("cls");
 
 	show_intro();
